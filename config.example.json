@@ -1,0 +1,8 @@
+{
+    "discord_client_id": "YOUR_DISCORD_APP_ID",
+    "kavita_url": "http://your-kavita-server:5000 OR https://kavita.yourdomain.com",
+    "kavita_api_key": "YOUR_API_KEY",
+    "kavita_username": "YOUR_USERNAME",
+    "kavita_password": "YOUR_PASSWORD",
+    "show_page_numbers": true
+}

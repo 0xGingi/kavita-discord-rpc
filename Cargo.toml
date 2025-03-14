@@ -1,0 +1,19 @@
+[package]
+name = "kavita-discord-rpc"
+version = "1.0.0"
+edition = "2021"
+authors = ["0xGingi <0xgingi@0xgingi.com>"]
+description = "Displays what you're reading on Kavita on Discord"
+
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+discord-rich-presence = { git = "https://github.com/vionya/discord-rich-presence" }
+reqwest = { version = "0.12.12", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+url = "2.5.4"
+futures = "0.3"
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
