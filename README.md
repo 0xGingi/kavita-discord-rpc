@@ -1,4 +1,7 @@
 # kavita-discord-rpc
+
+![image](https://github.com/user-attachments/assets/e5026b5d-1039-4101-9fef-d232bca1eb61)
+
 Displays what you're reading to on kavita on discord!
 
 * Note: This is still in development but should work "well enough"
