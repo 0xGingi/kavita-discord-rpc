@@ -1,3 +1,5 @@
 target/
 docs.json
 config.json
+build-windows.sh
+dist/

@@ -21,6 +21,8 @@ struct Config {
     kavita_username: String,
     kavita_password: String,
     show_page_numbers: Option<bool>,
+    blacklisted_series_ids: Option<Vec<i32>>,
+    blacklisted_series_names: Option<Vec<String>>,
 }
 
 #[allow(non_snake_case)]
@@ -269,6 +271,38 @@ async fn update_discord_status(
     // After login success, call our new function
     match check_current_progress(client, config, &jwt_token).await {
         Ok(Some((progress, series_id, format, series_name))) => {
+            // Check if series is blacklisted by ID
+            if let Some(blacklisted_ids) = &config.blacklisted_series_ids {
+                if blacklisted_ids.contains(&series_id) {
+                    info!("Series ID {} is blacklisted, not updating Discord status", series_id);
+                    if reading_state.is_reading {
+                        if let Err(e) = discord.clear_activity() {
+                            error!("Failed to clear Discord activity: {}", e);
+                        } else {
+                            reading_state.is_reading = false;
+                            info!("Cleared Discord status due to blacklisted series");
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+            
+            // Check if series is blacklisted by name
+            if let Some(blacklisted_names) = &config.blacklisted_series_names {
+                if blacklisted_names.iter().any(|name| series_name.contains(name)) {
+                    info!("Series '{}' matches blacklisted name, not updating Discord status", series_name);
+                    if reading_state.is_reading {
+                        if let Err(e) = discord.clear_activity() {
+                            error!("Failed to clear Discord activity: {}", e);
+                        } else {
+                            reading_state.is_reading = false;
+                            info!("Cleared Discord status due to blacklisted series");
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+            
             // Get chapter details - with better error handling
             let chapter_url = format!(
                 "{}/api/Chapter?chapterId={}",

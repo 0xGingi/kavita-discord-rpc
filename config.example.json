@@ -4,5 +4,7 @@
     "kavita_api_key": "YOUR_API_KEY",
     "kavita_username": "YOUR_USERNAME",
     "kavita_password": "YOUR_PASSWORD",
-    "show_page_numbers": true
+    "show_page_numbers": true,
+    "blacklisted_series_ids": [123, 456, 789],
+    "blacklisted_series_names": ["Private Series", "Secret Book"]
 }
