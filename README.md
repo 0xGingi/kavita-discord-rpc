@@ -1,10 +1,11 @@
 # kavita-discord-rpc
 
-![image](https://github.com/user-attachments/assets/e5026b5d-1039-4101-9fef-d232bca1eb61)
+![image](https://github.com/user-attachments/assets/b5efcc84-07e2-4849-b737-bf4b4a006c07)
+
+![image](https://github.com/user-attachments/assets/a5c56d2a-2015-456c-948a-a08b769cd54c)
+
 
 Displays what you're reading to on kavita on discord!
-
-* Note: This is still in development but should work "well enough"
 
 ## Install
 
