@@ -24,6 +24,9 @@ struct Config {
     show_page_numbers: Option<bool>,
     blacklisted_series_ids: Option<Vec<i32>>,
     blacklisted_series_names: Option<Vec<String>>,
+    blacklisted_tags: Option<Vec<String>>,
+    blacklisted_genres: Option<Vec<String>>,
+    blacklisted_library_ids: Option<Vec<i32>>,
     inactivity_timeout_minutes: Option<u64>,
 }
 
@@ -156,9 +159,20 @@ struct SeriesDetailDto {
 #[derive(Debug, Deserialize)]
 struct VolumeDto {
     id: i32,
+    number: i32,
     name: Option<String>,
-    // Only include essential fields for now
+    chapters: Vec<ChapterDto>,
     coverImage: Option<String>,
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Deserialize)]
+struct VolumeDetailDto {
+    id: i32,
+    number: String,
+    name: Option<String>,
+    pages: i32,
+    chapters: Vec<ChapterDto>,
 }
 
 #[tokio::main]
@@ -300,6 +314,22 @@ async fn update_discord_status(
     // After login success, call our new function
     match check_current_progress(client, config, &jwt_token).await {
         Ok(Some((progress, series_id, format, series_name))) => {
+            // Check if library is blacklisted by ID
+            if let Some(blacklisted_library_ids) = &config.blacklisted_library_ids {
+                if blacklisted_library_ids.contains(&progress.libraryId) {
+                    info!("Library ID {} is blacklisted, not updating Discord status", progress.libraryId);
+                    if reading_state.is_reading {
+                        if let Err(e) = discord.clear_activity() {
+                            error!("Failed to clear Discord activity: {}", e);
+                        } else {
+                            reading_state.is_reading = false;
+                            info!("Cleared Discord status due to blacklisted library");
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+            
             // Check if series is blacklisted by ID
             if let Some(blacklisted_ids) = &config.blacklisted_series_ids {
                 if blacklisted_ids.contains(&series_id) {
@@ -332,6 +362,83 @@ async fn update_discord_status(
                 }
             }
             
+            // Fetch series metadata to check tags and genres
+            if config.blacklisted_tags.is_some() || config.blacklisted_genres.is_some() {
+                let metadata_url = format!(
+                    "{}/api/Series/metadata?seriesId={}",
+                    config.kavita_url, series_id
+                );
+                
+                info!("Getting series metadata from: {}", metadata_url);
+                
+                let metadata_response = client
+                    .get(&metadata_url)
+                    .header("Authorization", format!("Bearer {}", jwt_token))
+                    .send()
+                    .await;
+                    
+                match metadata_response {
+                    Ok(response) if response.status().is_success() => {
+                        match response.json::<serde_json::Value>().await {
+                            Ok(metadata) => {
+                                // Check for blacklisted tags
+                                if let Some(blacklisted_tags) = &config.blacklisted_tags {
+                                    if let Some(tags) = metadata.get("tags").and_then(|t| t.as_array()) {
+                                        for tag in tags {
+                                            if let Some(tag_name) = tag.get("title").and_then(|t| t.as_str()) {
+                                                if blacklisted_tags.iter().any(|bt| tag_name.to_lowercase().contains(&bt.to_lowercase())) {
+                                                    info!("Series contains blacklisted tag: '{}', not updating Discord status", tag_name);
+                                                    if reading_state.is_reading {
+                                                        if let Err(e) = discord.clear_activity() {
+                                                            error!("Failed to clear Discord activity: {}", e);
+                                                        } else {
+                                                            reading_state.is_reading = false;
+                                                            info!("Cleared Discord status due to blacklisted tag");
+                                                        }
+                                                    }
+                                                    return Ok(());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Check for blacklisted genres
+                                if let Some(blacklisted_genres) = &config.blacklisted_genres {
+                                    if let Some(genres) = metadata.get("genres").and_then(|g| g.as_array()) {
+                                        for genre in genres {
+                                            if let Some(genre_name) = genre.get("title").and_then(|g| g.as_str()) {
+                                                if blacklisted_genres.iter().any(|bg| genre_name.to_lowercase().contains(&bg.to_lowercase())) {
+                                                    info!("Series contains blacklisted genre: '{}', not updating Discord status", genre_name);
+                                                    if reading_state.is_reading {
+                                                        if let Err(e) = discord.clear_activity() {
+                                                            error!("Failed to clear Discord activity: {}", e);
+                                                        } else {
+                                                            reading_state.is_reading = false;
+                                                            info!("Cleared Discord status due to blacklisted genre");
+                                                        }
+                                                    }
+                                                    return Ok(());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to parse series metadata: {}", e);
+                            }
+                        }
+                    },
+                    Ok(response) => {
+                        error!("Failed to get series metadata: {}", response.status());
+                    },
+                    Err(e) => {
+                        error!("Error fetching series metadata: {}", e);
+                    }
+                }
+            }
+            
             // Get chapter details - with better error handling
             let chapter_url = format!(
                 "{}/api/Chapter?chapterId={}",
@@ -352,8 +459,25 @@ async fn update_discord_status(
             }
             
             let chapter_text = chapter_response.text().await?;
-            let chapter: ChapterDto = match serde_json::from_str(&chapter_text) {
-                Ok(ch) => ch,
+            let chapter: ChapterDto = match serde_json::from_str::<ChapterDto>(&chapter_text) {
+                Ok(ch) => {
+                    // Log detailed chapter info for debugging
+                    //info!("DEBUG - Chapter details: {:#?}", ch);
+                    
+                    // For manga, also log the volume ID and chapter range
+                    if !ch.chapterNumber.contains("-100000") {
+                        info!("DEBUG - Manga chapter - volume ID: {}, range: {}, chapterNumber: {}", 
+                              ch.volumeId, ch.range, ch.chapterNumber);
+                        
+                        // Try to extract volume number from range
+                        let volume_number = ch.range.split('-').next()
+                            .and_then(|s| s.trim().parse::<f32>().ok())
+                            .map(|n| n.floor() as i32);
+                        info!("DEBUG - Extracted volume number from range: {:?}", volume_number);
+                    }
+                    
+                    ch
+                },
                 Err(e) => {
                     error!("Failed to parse chapter details: {}", e);
                     error!("Raw response: {}", chapter_text);
@@ -422,90 +546,113 @@ async fn update_discord_status(
             }
             
             let series_text = series_response.text().await?;
-            let series: SeriesDto = match serde_json::from_str::<SeriesDetailDto>(&series_text) {
-                Ok(detail) => {
-                    // Extract series information from the first special or create from scratch
-                    let special = detail.specials.first();
+
+            // Log raw response for debugging
+            //info!("DEBUG - Series response raw: {}", series_text);
+
+            let series: SeriesDto = match serde_json::from_str::<SeriesDto>(&series_text) {
+                Ok(s) => {
+                    // Log detailed series info
+                    //info!("DEBUG - Series details: {:#?}", s);
                     
-                    SeriesDto {
-                        id: series_id,
-                        name: if let Some(special) = special {
-                            special.title.clone().unwrap_or_else(|| special.range.clone())
-                        } else if !series_name.is_empty() {
-                            series_name.clone()
-                        } else {
-                            // Fallback to default name
-                            format!("Series {}", series_id)
-                        },
-                        originalName: None,
-                        localizedName: None,
-                        sortName: None,
-                        format: format,
-                        coverImage: special.and_then(|s| s.coverImage.clone()),
-                        libraryId: progress.libraryId,
-                        libraryName: "".to_string(),
-                        pagesRead: None,
-                        pages: None,
-                        wordCount: None,
-                    }
+                    // For manga, log format information
+                    //if !series_name.is_empty() {
+                    //    info!("DEBUG - Manga series - format: {}, libraryId: {}", 
+                    //          s.format, s.libraryId);
+                    //}
+                    
+                    s
                 },
                 Err(e) => {
-                    error!("Failed to parse series details: {}", e);
-                    error!("Raw response: {}", series_text);
-                    
-                    // Try to use book info as fallback
-                    let book_url = format!(
-                        "{}/api/book/{}/book-info",
-                        config.kavita_url, progress.chapterId
-                    );
-                    
-                    let book_resp = client
-                        .get(&book_url)
-                        .header("Authorization", format!("Bearer {}", jwt_token))
-                        .send()
-                        .await?;
-                    
-                    if !book_resp.status().is_success() {
-                        error!("Failed to get book info: {}", book_resp.status());
-                        // Return minimal SeriesDto
-                        SeriesDto {
-                            id: series_id,
-                            name: format!("Series {}", series_id),
-                            originalName: None,
-                            localizedName: None,
-                            sortName: None,
-                            format: format,
-                            coverImage: None,
-                            libraryId: progress.libraryId,
-                            libraryName: "".to_string(),
-                            pagesRead: None,
-                            pages: None,
-                            wordCount: None,
-                        }
-                    } else {
-                        let book_info: BookInfoDto = match book_resp.json().await {
-                            Ok(bi) => bi,
-                            Err(e) => {
-                                error!("Failed to parse book info: {}", e);
-                                // This function returns Result<(), _> so we need ()
-                                return Ok(());
+                    // If that fails, try to parse as SeriesDetailDto
+                    match serde_json::from_str::<SeriesDetailDto>(&series_text) {
+                        Ok(detail) => {
+                            // Extract series information from the first special or create from scratch
+                            let special = detail.specials.first();
+                            
+                            SeriesDto {
+                                id: series_id,
+                                name: if let Some(special) = special {
+                                    special.title.clone().unwrap_or_else(|| special.range.clone())
+                                } else if !series_name.is_empty() {
+                                    series_name.clone()
+                                } else {
+                                    // Fallback to default name
+                                    format!("Series {}", series_id)
+                                },
+                                originalName: None,
+                                localizedName: None,
+                                sortName: None,
+                                format: format,
+                                coverImage: special.and_then(|s| s.coverImage.clone()),
+                                libraryId: progress.libraryId,
+                                libraryName: "".to_string(),
+                                pagesRead: None,
+                                pages: None,
+                                wordCount: None,
                             }
-                        };
-                        
-                        // Create SeriesDto from book info
-                        SeriesDto {
-                            id: book_info.seriesId,
-                            name: book_info.seriesName.clone(),
-                            originalName: None,
-                            localizedName: None,
-                            sortName: None,
-                            format: book_info.seriesFormat,
-                            coverImage: None,
-                            libraryId: book_info.libraryId,
-                            libraryName: "".to_string(),
-                            pagesRead: None,
-                            pages: Some(book_info.pages),
-                            wordCount: None,
+                        },
+                        Err(e2) => {
+                            error!("Failed to parse series details as both SeriesDto and SeriesDetailDto");
+                            error!("SeriesDto error: {}", e);
+                            error!("SeriesDetailDto error: {}", e2);
+                            error!("Raw series response: {}", series_text);
+                            
+                            // Try to use book info as fallback
+                            let book_url = format!(
+                                "{}/api/book/{}/book-info",
+                                config.kavita_url, progress.chapterId
+                            );
+                            
+                            let book_resp = client
+                                .get(&book_url)
+                                .header("Authorization", format!("Bearer {}", jwt_token))
+                                .send()
+                                .await?;
+                            
+                            if !book_resp.status().is_success() {
+                                error!("Failed to get book info: {}", book_resp.status());
+                                // Return minimal SeriesDto
+                                SeriesDto {
+                                    id: series_id,
+                                    name: format!("Series {}", series_id),
+                                    originalName: None,
+                                    localizedName: None,
+                                    sortName: None,
+                                    format: format,
+                                    coverImage: None,
+                                    libraryId: progress.libraryId,
+                                    libraryName: "".to_string(),
+                                    pagesRead: None,
+                                    pages: None,
+                                    wordCount: None,
+                                }
+                            } else {
+                                let book_info: BookInfoDto = match book_resp.json().await {
+                                    Ok(bi) => bi,
+                                    Err(e) => {
+                                        error!("Failed to parse book info: {}", e);
+                                        // This function returns Result<(), _> so we need ()
+                                        return Ok(());
+                                    }
+                                };
+                                
+                                // Create SeriesDto from book info
+                                SeriesDto {
+                                    id: book_info.seriesId,
+                                    name: book_info.seriesName.clone(),
+                                    originalName: None,
+                                    localizedName: None,
+                                    sortName: None,
+                                    format: book_info.seriesFormat,
+                                    coverImage: None,
+                                    libraryId: book_info.libraryId,
+                                    libraryName: "".to_string(),
+                                    pagesRead: None,
+                                    pages: Some(book_info.pages),
+                                    wordCount: None,
+                                }
+                            }
                         }
                     }
                 }
@@ -528,7 +675,157 @@ async fn update_discord_status(
                 });
             }
             
-            // Set Discord activity with better error handling
+            // Extract author information from file path if available
+            let author = if let Some(files) = &chapter.files {
+                if !files.is_empty() {
+                    let file_path = &files[0].filePath;
+                    // Extract author from file path - assuming format like "/books/Author/Title"
+                    file_path.split('/').nth(2).unwrap_or("Unknown Author").to_string()
+                } else {
+                    "Unknown Author".to_string()
+                }
+            } else {
+                "Unknown Author".to_string()
+            };
+            
+            let book_title = series.name.clone();
+            
+            let is_book = if chapter.chapterNumber.contains("-100000") || chapter.chapterNumber == "-100000" {
+                if let Ok(detail) = serde_json::from_str::<SeriesDetailDto>(&series_text) {
+                    let found_volume = detail.volumes.iter().any(|vol| vol.id == chapter.volumeId);
+                    
+                    if found_volume && chapter.volumeId > 0 {
+                        info!("Detected as manga volume: volumeId={}", chapter.volumeId);
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            } else {
+                false
+            };
+
+            //info!("Enhanced book detection: chapterNumber={}, volumeId={}, format={}, is_book={}", 
+            //      chapter.chapterNumber, chapter.volumeId, series.format, is_book);
+            
+            let volume_info = if !is_book {
+                match serde_json::from_str::<SeriesDetailDto>(&series_text) {
+                    Ok(detail) => {
+                        get_volume_info_from_detail(&detail, chapter.volumeId, is_book)
+                    },
+                    Err(_) => {
+                        if chapter.volumeId > 0 {
+                            let volume_number = chapter.range.split('-').next()
+                                .and_then(|s| s.trim().parse::<f32>().ok())
+                                .map(|n| n.floor() as i32)
+                                .unwrap_or(0);
+                                
+                            if volume_number > 0 {
+                                info!("Using chapter range to determine volume: {}", volume_number);
+                                format!("Vol. {}", volume_number)
+                            } else {
+                                format!("Vol. {}", chapter.volumeId % 1000)
+                            }
+                        } else {
+                            "".to_string()
+                        }
+                    }
+                }
+            } else {
+                "".to_string()
+            };
+
+            let chapter_info = if is_book {
+                "".to_string()
+            } else if chapter.chapterNumber.contains("-100000") && !volume_info.is_empty() {
+                volume_info.clone()
+            } else if let Some(title) = &chapter.title {
+                if !title.is_empty() && title != &book_title {
+                    format!("Ch. {} - ", title)
+                } else {
+                    format!("Ch. {} - ", chapter.range)
+                }
+            } else {
+                format!("Ch. {} - ", chapter.range)
+            };
+            
+            let state_text = if is_book {
+                if config.show_page_numbers.unwrap_or(false) {
+                    format!("{} - Page {} of {}", author.clone(), progress.pageNum, chapter.pages)
+                } else {
+                    author.clone()
+                }
+            } else if chapter.chapterNumber.contains("-100000") && !volume_info.is_empty() {
+                // Special case for manga volumes - show volume info but not chapter info
+                if config.show_page_numbers.unwrap_or(false) {
+                    format!("{} - {} - Page {} of {}", 
+                        author.clone(),
+                        volume_info,
+                        progress.pageNum, 
+                        chapter.pages
+                    )
+                } else {
+                    format!("{} - {}", author.clone(), volume_info)
+                }
+            } else if config.show_page_numbers.unwrap_or(false) {
+                // Regular chapters with page numbers
+                format!("{} - {} Page {} of {}", 
+                    author.clone(),
+                    chapter_info,
+                    progress.pageNum, 
+                    chapter.pages
+                )
+            } else {
+                // Regular chapters without page numbers
+                if !chapter_info.is_empty() {
+                    format!("{} - {}", author.clone(), chapter_info)
+                } else {
+                    author.clone()
+                }
+            };
+
+            // Truncate if necessary
+            let state_text = if state_text.len() > 100 { state_text[..100].to_string() } else { state_text };
+            
+            // Format the details (book title)
+            let details_text = if book_title.len() > 100 { 
+                book_title[..100].to_string() 
+            } else { 
+                book_title.clone()
+            };
+
+            let large_text = format!("{} - {}", details_text, state_text);
+            let large_text = if large_text.len() > 100 { large_text[..100].to_string() } else { large_text };
+            
+            let series_cover_url = if let Some(cover_image) = &series.coverImage {
+                if !cover_image.is_empty() {
+                    Some(format!("{}/api/Image/series-cover?seriesId={}&apiKey={}", 
+                        config.kavita_url, series.id, config.kavita_api_key))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let chapter_cover_url = if let Some(cover_image) = &chapter.coverImage {
+                if !cover_image.is_empty() {
+                    Some(format!("{}/api/Image/chapter-cover?chapterId={}&apiKey={}", 
+                        config.kavita_url, chapter.id, config.kavita_api_key))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let mut activity_builder = activity::Activity::new()
+                .details(&details_text)
+                .state(&state_text);
+                
+            // Add timestamps if valid
             let now = SystemTime::now();
             let now_secs = match now.duration_since(UNIX_EPOCH) {
                 Ok(d) => d.as_secs() as i64,
@@ -538,108 +835,67 @@ async fn update_discord_status(
                 }
             };
             
-            // Calculate estimated end time based on reading progress
-            let pages_left = chapter.pages - progress.pageNum;
-            let avg_page_time = 20; // Assume average 20 seconds per page
-            let estimated_seconds_left = pages_left as i64 * avg_page_time;
-            
-            let chapter_title = if chapter.range.contains("-100000") || chapter.range == "-100000" {
-                // This is likely a book without regular chapter numbers
-                if let Some(title) = &chapter.title {
-                    if !title.is_empty() {
-                        title.clone()
-                    } else {
-                        // Just use the series name since this is probably a book
-                        series.name.clone()
-                    }
-                } else {
-                    series.name.clone()
-                }
-            } else if let Some(title) = &chapter.title {
-                if !title.is_empty() {
-                    format!("{} - {}", chapter.range, title)
-                } else {
-                    format!("Chapter {}", chapter.range)
-                }
-            } else {
-                format!("Chapter {}", chapter.range)
-            };
-            
-            let state_text = if chapter.range.contains("-100000") {
-                // For books, just show page numbers if enabled
-                if config.show_page_numbers.unwrap_or(false) {
-                    format!("Page/Chapter {} of {}", progress.pageNum, chapter.pages)
-                } else {
-                    // Otherwise don't show any chapter info for books
-                    "".to_string()
-                }
-            } else if config.show_page_numbers.unwrap_or(false) {
-                format!("{} (Page/Chapter {} of {})", chapter_title.clone(), progress.pageNum, chapter.pages)
-            } else {
-                chapter_title.clone()
-            };
-            
-            let cover_url = if let Some(_cover) = chapter.coverImage {
-                format!("{}/api/Image/chapter-cover?chapterId={}&apiKey={}", 
-                    config.kavita_url, chapter.id, config.kavita_api_key)
-            } else if let Some(_cover) = series.coverImage {
-                format!("{}/api/Image/series-cover?seriesId={}&apiKey={}", 
-                    config.kavita_url, series.id, config.kavita_api_key)
-            } else {
-                "".to_string()
-            };
-            
-            // Limit text lengths to avoid Discord API issues
-            let series_name = if series.name.len() > 100 { series.name[..100].to_string() } else { series.name.clone() };
-            let state_text = if state_text.len() > 100 { state_text[..100].to_string() } else { state_text };
-            
-            let large_text = format!("Reading {} - {}", series_name, chapter_title);
-            let large_text = if large_text.len() > 100 { large_text[..100].to_string() } else { large_text };
-            
-            let mut activity_builder = activity::Activity::new()
-                .details(&series_name)
-                .state(&state_text);
-                
-            // Add timestamps if valid
             if now_secs > 0 {
                 activity_builder = activity_builder.timestamps(
                     activity::Timestamps::new()
-                        .start(now_secs - ((progress.pageNum as i64) * avg_page_time))
-                        .end(now_secs + estimated_seconds_left)
+                        .start(now_secs - ((progress.pageNum as i64) * 20))
+                        .end(now_secs + 20 * (chapter.pages as i64 - progress.pageNum as i64))
                 );
             }
             
-            if !cover_url.is_empty() {
+            if let Some(url) = &series_cover_url {
                 activity_builder = activity_builder.assets(
                     activity::Assets::new()
-                        .large_image(&cover_url)
+                        .large_image(url)
+                        .large_text(&large_text)
+                );
+            } else if let Some(url) = &chapter_cover_url {
+                activity_builder = activity_builder.assets(
+                    activity::Assets::new()
+                        .large_image(url)
                         .large_text(&large_text)
                 );
             }
             
-            // Try to set the activity with better error handling
             match discord.set_activity(activity_builder) {
                 Ok(_) => {
                     info!("Updated Discord status: reading {}", 
                         if chapter.range.contains("-100000") { 
-                            series_name.clone() 
+                            series.name.clone() 
                         } else { 
-                            format!("{} ({})", series_name, chapter_title)
+                            format!("{} ({})", series.name, chapter.range)
                         }
                     );
                 },
                 Err(e) => {
                     error!("Failed to set Discord activity: {}", e);
                     
-                    // Try with a simpler activity
                     match discord.set_activity(activity::Activity::new()
-                        .details(&series_name)
+                        .details(&series.name)
                         .state("Reading...")) {
                         Ok(_) => info!("Set simplified Discord status"),
                         Err(e) => error!("Failed to set simplified Discord activity: {}", e)
                     }
                 }
             }
+
+            // Add detailed debug logs for volume info 
+            //info!("Volume info detection results:");
+            //info!("- Is book: {}", is_book);
+            //info!("- ChapterDto volumeId: {}", chapter.volumeId);
+            //info!("- Volume info extracted: '{}'", volume_info);
+            if let Ok(detail) = serde_json::from_str::<SeriesDetailDto>(&series_text) {
+                info!("- Available volumes in series: {}", detail.volumes.len());
+                for vol in &detail.volumes {
+                    info!("  Volume: id={}, number={}, name={:?}", vol.id, vol.number, vol.name);
+                }
+            }
+
+            //info!("Status text components:");
+            //info!("- Book title: {}", book_title);
+            //info!("- Author: {}", author);
+            //info!("- Chapter info: '{}'", chapter_info);
+            //info!("- Final state text: '{}'", state_text);
         },
         Ok(None) => {
             // No recent activity, clear status
@@ -799,4 +1055,25 @@ async fn check_kavita_server(client: &Client, config: &Config) -> Result<(), Box
     }
     
     Ok(())
+}
+
+fn get_volume_info_from_detail(
+    detail: &SeriesDetailDto, 
+    chapter_volume_id: i32, 
+    is_book: bool
+) -> String {
+    if is_book || chapter_volume_id <= 0 {
+        return "".to_string();
+    }
+    
+    for vol in &detail.volumes {
+        if vol.id == chapter_volume_id {
+            info!("Found matching volume in detail: id={}, name={:?}, number={}", 
+                 vol.id, vol.name, vol.number);
+            
+            return format!("Vol. {}", vol.number);
+        }
+    }
+    
+    "".to_string()
 }

@@ -7,5 +7,8 @@
     "show_page_numbers": true,
     "inactivity_timeout_minutes": 15,
     "blacklisted_series_ids": [123, 456, 789],
-    "blacklisted_series_names": ["Private Series", "Secret Book"]
+    "blacklisted_series_names": ["Private Series", "Secret Book"],
+    "blacklisted_tags": ["NSFW", "Ecchi", "Adults Only"],
+    "blacklisted_genres": ["Horror", "Romance"],
+    "blacklisted_library_ids": [2, 5]
 }
