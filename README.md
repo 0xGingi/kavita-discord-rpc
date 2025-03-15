@@ -26,9 +26,9 @@ cd kavita-discord-rpc
 ```
 2. Rename config/config-example.json to config/config.json and modify it
 3. Modify docker-compose.yml -TZ with your kavita server's timezone
-4. Run and Build
+4. Run
 ```
-docker compose up -d --build
+docker compose up -d
 ```
 
 ## Build

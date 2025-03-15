@@ -1,6 +1,6 @@
 services:
   kavita-discord-rpc:
-    build: .
+    image: 0xgingi/kavita-discord-rpc:latest
     volumes:
       - ./config:/app/config
       - /run/user/1000/discord-ipc-0:/run/user/1000/discord-ipc-0

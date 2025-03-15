@@ -2,3 +2,5 @@ target/
 config.json
 build-windows.sh
 dist/
+build-docker.sh
+.dockerignore
