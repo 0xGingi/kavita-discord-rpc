@@ -6,10 +6,11 @@ use tokio::time;
 use reqwest::Client;
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
-use log::{info, error};
+use log::{info, error, warn};
 use env_logger;
 use chrono;
 use chrono::TimeZone;
+use std::ops::Sub;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,6 +24,7 @@ struct Config {
     show_page_numbers: Option<bool>,
     blacklisted_series_ids: Option<Vec<i32>>,
     blacklisted_series_names: Option<Vec<String>>,
+    inactivity_timeout_minutes: Option<u64>,
 }
 
 #[allow(non_snake_case)]
@@ -223,6 +225,33 @@ async fn update_discord_status(
     reading_state: &mut ReadingState,
     current_book: &mut Option<Book>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if Kavita server is accessible
+    match check_kavita_server(client, config).await {
+        Err(e) => {
+            info!("Kavita server unreachable: {}. Clearing Discord status.", e);
+            discord.clear_activity()?;
+            reading_state.is_reading = false;
+            *current_book = None;
+            return Ok(());
+        },
+        Ok(_) => {}
+    }
+    
+    // Check for inactivity timeout (use config value)
+    if reading_state.is_reading {
+        match reading_state.last_api_time.elapsed() {
+            Ok(elapsed) if elapsed.as_secs() > config.inactivity_timeout_minutes.unwrap_or(30) * 60 => {
+                info!("No activity for {} minutes. Clearing Discord status.", 
+                      config.inactivity_timeout_minutes.unwrap_or(30));
+                discord.clear_activity()?;
+                reading_state.is_reading = false;
+                *current_book = None;
+                return Ok(());
+            },
+            _ => {}
+        }
+    }
+    
     // First check server health to ensure we can connect
     let health_url = format!("{}/api/Health", config.kavita_url);
     info!("Checking Kavita server health at: {}", health_url);
@@ -631,7 +660,6 @@ async fn update_discord_status(
     Ok(())
 }
 
-// Add this function to check current progress for all series
 async fn check_current_progress(
     client: &Client,
     config: &Config,
@@ -683,59 +711,27 @@ async fn check_current_progress(
                         let most_recent = &events[0];
                         
                         let read_date = most_recent.readDate.clone();
-                        let timestamp = match chrono::NaiveDateTime::parse_from_str(
-                            &read_date, 
-                            "%Y-%m-%dT%H:%M:%S.%f"
+                        info!("Last reading timestamp: {}", read_date);
+
+                        let event_time = match chrono::NaiveDateTime::parse_from_str(
+                            &read_date.replace('T', " ").split('.').next().unwrap_or(&read_date),
+                            "%Y-%m-%d %H:%M:%S"
                         ) {
-                            Ok(naive_date) => {
-                                let date_time = chrono::Utc.from_utc_datetime(&naive_date);
-                                date_time.timestamp()
-                            },
+                            Ok(dt) => dt,
                             Err(e) => {
-                                error!("Error parsing date '{}': {}. Trying RFC3339 format...", read_date, e);
-                                
-                                match chrono::DateTime::parse_from_rfc3339(&read_date) {
-                                    Ok(date) => date.timestamp(),
-                                    Err(e2) => {
-                                        error!("Alternative date parsing also failed: {}", e2);
-                                        
-                                        let parts: Vec<&str> = read_date.split(|c| c == 'T' || c == '.' || c == ':').collect();
-                                        if parts.len() >= 6 {
-                                            let year: i32 = parts[0].parse().unwrap_or(2025);
-                                            let month: u32 = parts[1].parse().unwrap_or(1);
-                                            let day: u32 = parts[2].parse().unwrap_or(1);
-                                            let hour: u32 = parts[3].parse().unwrap_or(0);
-                                            let min: u32 = parts[4].parse().unwrap_or(0);
-                                            let sec: u32 = parts[5].parse().unwrap_or(0);
-                                            
-                                            match chrono::NaiveDate::from_ymd_opt(year, month, day)
-                                                .and_then(|d| d.and_hms_opt(hour, min, sec))
-                                                .map(|dt| chrono::Utc.from_utc_datetime(&dt).timestamp())
-                                            {
-                                                Some(ts) => ts,
-                                                None => {
-                                                    error!("Manual date parsing failed as well, using current time");
-                                                    chrono::Utc::now().timestamp() - 14400
-                                                }
-                                            }
-                                        } else {
-                                            error!("Date is not in expected format, using current time");
-                                            chrono::Utc::now().timestamp() - 14400
-                                        }
-                                    }
-                                }
+                                error!("Error parsing date '{}': {}. Using current time.", read_date, e);
+                                chrono::Local::now().naive_local()
                             }
                         };
+
+                        let now = chrono::Local::now().naive_local();
                         
-                        let now = chrono::Utc::now().timestamp();
-                        let mut seconds_ago = now - timestamp;
-                        
-                        if seconds_ago > 3600 && seconds_ago < 86400 {
-                            seconds_ago = 0;
-                        }
-                        
-                        let recent_threshold = 900;
-                        
+                        let seconds_ago = (now - event_time).num_seconds();
+                        info!("Last activity: {} seconds ago (local comparison)", seconds_ago);
+
+                        let recent_threshold = (config.inactivity_timeout_minutes
+                            .unwrap_or(15) * 60) as i64;  // Convert u64 to i64
+
                         if seconds_ago < recent_threshold {
                             let chapter_id = most_recent.chapterId;
                             let series_id = most_recent.seriesId;
@@ -770,4 +766,19 @@ async fn check_current_progress(
     }
     
     Ok(None)
+}
+
+async fn check_kavita_server(client: &Client, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    // Simple health check - try to access the API
+    let url = format!("{}/api/server/health", config.kavita_url);
+    let response = client.get(&url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Server returned status {}", response.status()).into());
+    }
+    
+    Ok(())
 }
