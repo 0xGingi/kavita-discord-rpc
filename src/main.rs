@@ -9,10 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::{info, error, warn};
 use env_logger;
 use chrono;
-use chrono::TimeZone;
-use std::ops::Sub;
 use std::cmp::Ordering;
-use semver::{Version, VersionReq};
+use semver::Version;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -35,26 +33,18 @@ struct Config {
 #[allow(non_snake_case)]
 #[derive(Debug, Deserialize)]
 struct ReadHistoryEvent {
-    userId: i32,
-    userName: String,
-    libraryId: i32,
     seriesId: i32,
     seriesName: String,
     readDate: String,
     chapterId: i32,
-    chapterNumber: f32,
 }
 
 #[allow(non_snake_case)]
 #[derive(Debug, Deserialize, Clone)]
 struct ProgressDto {
-    volumeId: i32,
     chapterId: i32,
     pageNum: i32,
-    seriesId: i32,
     libraryId: i32,
-    bookScrollId: Option<String>,
-    lastModifiedUtc: String,
 }
 
 #[allow(non_snake_case)]
@@ -64,29 +54,17 @@ struct ChapterDto {
     range: String,
     title: Option<String>,
     pages: i32,
-    isSpecial: bool,
     coverImage: Option<String>,
     volumeId: i32,
-    pagesRead: i32,
-    #[serde(default)]
-    libraryId: i32,
     #[serde(rename = "number", default)]
     chapterNumber: String,
-    wordCount: Option<i64>,
-    summary: Option<String>,
     files: Option<Vec<FileDto>>,
 }
 
 #[allow(non_snake_case)]
 #[derive(Debug, Deserialize)]
 struct FileDto {
-    id: i64,
     filePath: String,
-    pages: i32,
-    bytes: i64,
-    format: i32,
-    created: String,
-    extension: String,
 }
 
 #[allow(non_snake_case)]
@@ -94,21 +72,11 @@ struct FileDto {
 struct SeriesDto {
     id: i32,
     name: String,
-    originalName: Option<String>,
-    localizedName: Option<String>,
-    sortName: Option<String>,
-    format: i32,
     coverImage: Option<String>,
-    libraryId: i32,
-    libraryName: String,
-    pagesRead: Option<i32>,
-    pages: Option<i32>,
-    wordCount: Option<i64>,
 }
 
 #[derive(Debug)]
 struct Book {
-    name: String,
     series_id: i32,
     chapter_id: i32,
 }
@@ -126,23 +94,16 @@ struct ReadingState {
 struct UserDto {
     username: Option<String>,
     token: Option<String>,
-    refreshToken: Option<String>,
-    // Other fields can be omitted if not needed
 }
 
 #[allow(non_snake_case)]
 #[derive(Debug, Deserialize)]
 struct BookInfoDto {
-    bookTitle: String,
     seriesId: i32,
     volumeId: i32,
-    seriesFormat: i32,
     seriesName: String,
     chapterNumber: String,
-    volumeNumber: String,
-    libraryId: i32,
     pages: i32,
-    isSpecial: bool,
     chapterTitle: Option<String>,
 }
 
@@ -150,11 +111,7 @@ struct BookInfoDto {
 #[derive(Debug, Deserialize)]
 struct SeriesDetailDto {
     specials: Vec<ChapterDto>,
-    chapters: Vec<ChapterDto>,
     volumes: Vec<VolumeDto>,
-    storylineChapters: Vec<ChapterDto>,
-    unreadCount: i32,
-    totalCount: i32,
 }
 
 #[allow(non_snake_case)]
@@ -163,18 +120,6 @@ struct VolumeDto {
     id: i32,
     number: i32,
     name: Option<String>,
-    chapters: Vec<ChapterDto>,
-    coverImage: Option<String>,
-}
-
-#[allow(non_snake_case)]
-#[derive(Debug, Deserialize)]
-struct VolumeDetailDto {
-    id: i32,
-    number: String,
-    name: Option<String>,
-    pages: i32,
-    chapters: Vec<ChapterDto>,
 }
 
 #[tokio::main]
@@ -186,7 +131,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = parse_args()?;
     info!("Using config file: {}", config_file);
     
-    // Check for updates at startup
     if let Err(e) = check_for_updates(&client).await {
         warn!("Failed to check for updates: {}", e);
     }
@@ -246,7 +190,6 @@ async fn update_discord_status(
     reading_state: &mut ReadingState,
     current_book: &mut Option<Book>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if Kavita server is accessible
     match check_kavita_server(client, config).await {
         Err(e) => {
             info!("Kavita server unreachable: {}. Clearing Discord status.", e);
@@ -258,7 +201,6 @@ async fn update_discord_status(
         Ok(_) => {}
     }
     
-    // Check for inactivity timeout (use config value)
     if reading_state.is_reading {
         match reading_state.last_api_time.elapsed() {
             Ok(elapsed) if elapsed.as_secs() > config.inactivity_timeout_minutes.unwrap_or(30) * 60 => {
@@ -273,7 +215,6 @@ async fn update_discord_status(
         }
     }
     
-    // First check server health to ensure we can connect
     let health_url = format!("{}/api/Health", config.kavita_url);
     info!("Checking Kavita server health at: {}", health_url);
 
@@ -292,7 +233,6 @@ async fn update_discord_status(
         }
     }
     
-    // Login to get JWT token
     let login_url = format!("{}/api/Account/login", config.kavita_url);
     info!("Logging in to Kavita at: {}", login_url);
     
@@ -318,10 +258,8 @@ async fn update_discord_status(
     let jwt_token = user_data.token.ok_or("JWT token not found in login response")?;
     info!("Successfully logged in as {}", user_data.username.unwrap_or_default());
     
-    // After login success, call our new function
     match check_current_progress(client, config, &jwt_token).await {
-        Ok(Some((progress, series_id, format, series_name))) => {
-            // Check if library is blacklisted by ID
+        Ok(Some((progress, series_id, _format, series_name))) => {
             if let Some(blacklisted_library_ids) = &config.blacklisted_library_ids {
                 if blacklisted_library_ids.contains(&progress.libraryId) {
                     info!("Library ID {} is blacklisted, not updating Discord status", progress.libraryId);
@@ -337,7 +275,6 @@ async fn update_discord_status(
                 }
             }
             
-            // Check if series is blacklisted by ID
             if let Some(blacklisted_ids) = &config.blacklisted_series_ids {
                 if blacklisted_ids.contains(&series_id) {
                     info!("Series ID {} is blacklisted, not updating Discord status", series_id);
@@ -353,7 +290,6 @@ async fn update_discord_status(
                 }
             }
             
-            // Check if series is blacklisted by name
             if let Some(blacklisted_names) = &config.blacklisted_series_names {
                 if blacklisted_names.iter().any(|name| series_name.contains(name)) {
                     info!("Series '{}' matches blacklisted name, not updating Discord status", series_name);
@@ -369,7 +305,6 @@ async fn update_discord_status(
                 }
             }
             
-            // Fetch series metadata to check tags and genres
             if config.blacklisted_tags.is_some() || config.blacklisted_genres.is_some() {
                 let metadata_url = format!(
                     "{}/api/Series/metadata?seriesId={}",
@@ -410,7 +345,6 @@ async fn update_discord_status(
                                     }
                                 }
                                 
-                                // Check for blacklisted genres
                                 if let Some(blacklisted_genres) = &config.blacklisted_genres {
                                     if let Some(genres) = metadata.get("genres").and_then(|g| g.as_array()) {
                                         for genre in genres {
@@ -446,7 +380,6 @@ async fn update_discord_status(
                 }
             }
             
-            // Get chapter details - with better error handling
             let chapter_url = format!(
                 "{}/api/Chapter?chapterId={}",
                 config.kavita_url, progress.chapterId
@@ -468,15 +401,10 @@ async fn update_discord_status(
             let chapter_text = chapter_response.text().await?;
             let chapter: ChapterDto = match serde_json::from_str::<ChapterDto>(&chapter_text) {
                 Ok(ch) => {
-                    // Log detailed chapter info for debugging
-                    //info!("DEBUG - Chapter details: {:#?}", ch);
-                    
-                    // For manga, also log the volume ID and chapter range
                     if !ch.chapterNumber.contains("-100000") {
                         info!("DEBUG - Manga chapter - volume ID: {}, range: {}, chapterNumber: {}", 
                               ch.volumeId, ch.range, ch.chapterNumber);
                         
-                        // Try to extract volume number from range
                         let volume_number = ch.range.split('-').next()
                             .and_then(|s| s.trim().parse::<f32>().ok())
                             .map(|n| n.floor() as i32);
@@ -489,7 +417,6 @@ async fn update_discord_status(
                     error!("Failed to parse chapter details: {}", e);
                     error!("Raw response: {}", chapter_text);
                     
-                    // Create a minimal ChapterDto from book info
                     let book_url = format!(
                         "{}/api/book/{}/book-info",
                         config.kavita_url, progress.chapterId
@@ -504,20 +431,14 @@ async fn update_discord_status(
                         Ok(book_resp) if book_resp.status().is_success() => {
                             match book_resp.json::<BookInfoDto>().await {
                                 Ok(book_info) => {
-                                    // Create a minimal ChapterDto from book info
                                     ChapterDto {
                                         id: progress.chapterId,
                                         range: book_info.seriesName.clone(),
                                         title: book_info.chapterTitle.clone(),
                                         pages: book_info.pages,
-                                        isSpecial: book_info.isSpecial,
                                         coverImage: None,
                                         volumeId: book_info.volumeId,
-                                        pagesRead: 0,
-                                        libraryId: book_info.libraryId,
                                         chapterNumber: book_info.chapterNumber.clone(),
-                                        wordCount: None,
-                                        summary: None,
                                         files: None,
                                     }
                                 },
@@ -533,7 +454,6 @@ async fn update_discord_status(
                 }
             };
             
-            // Get series details - with better error handling
             let series_url = format!(
                 "{}/api/Series/series-detail?seriesId={}",
                 config.kavita_url, series_id
@@ -554,27 +474,14 @@ async fn update_discord_status(
             
             let series_text = series_response.text().await?;
 
-            // Log raw response for debugging
-            //info!("DEBUG - Series response raw: {}", series_text);
 
             let series: SeriesDto = match serde_json::from_str::<SeriesDto>(&series_text) {
                 Ok(s) => {
-                    // Log detailed series info
-                    //info!("DEBUG - Series details: {:#?}", s);
-                    
-                    // For manga, log format information
-                    //if !series_name.is_empty() {
-                    //    info!("DEBUG - Manga series - format: {}, libraryId: {}", 
-                    //          s.format, s.libraryId);
-                    //}
-                    
                     s
                 },
                 Err(e) => {
-                    // If that fails, try to parse as SeriesDetailDto
                     match serde_json::from_str::<SeriesDetailDto>(&series_text) {
                         Ok(detail) => {
-                            // Extract series information from the first special or create from scratch
                             let special = detail.specials.first();
                             
                             SeriesDto {
@@ -584,19 +491,9 @@ async fn update_discord_status(
                                 } else if !series_name.is_empty() {
                                     series_name.clone()
                                 } else {
-                                    // Fallback to default name
                                     format!("Series {}", series_id)
                                 },
-                                originalName: None,
-                                localizedName: None,
-                                sortName: None,
-                                format: format,
                                 coverImage: special.and_then(|s| s.coverImage.clone()),
-                                libraryId: progress.libraryId,
-                                libraryName: "".to_string(),
-                                pagesRead: None,
-                                pages: None,
-                                wordCount: None,
                             }
                         },
                         Err(e2) => {
@@ -605,7 +502,6 @@ async fn update_discord_status(
                             error!("SeriesDetailDto error: {}", e2);
                             error!("Raw series response: {}", series_text);
                             
-                            // Try to use book info as fallback
                             let book_url = format!(
                                 "{}/api/book/{}/book-info",
                                 config.kavita_url, progress.chapterId
@@ -619,45 +515,24 @@ async fn update_discord_status(
                             
                             if !book_resp.status().is_success() {
                                 error!("Failed to get book info: {}", book_resp.status());
-                                // Return minimal SeriesDto
                                 SeriesDto {
                                     id: series_id,
                                     name: format!("Series {}", series_id),
-                                    originalName: None,
-                                    localizedName: None,
-                                    sortName: None,
-                                    format: format,
                                     coverImage: None,
-                                    libraryId: progress.libraryId,
-                                    libraryName: "".to_string(),
-                                    pagesRead: None,
-                                    pages: None,
-                                    wordCount: None,
                                 }
                             } else {
                                 let book_info: BookInfoDto = match book_resp.json().await {
                                     Ok(bi) => bi,
                                     Err(e) => {
                                         error!("Failed to parse book info: {}", e);
-                                        // This function returns Result<(), _> so we need ()
                                         return Ok(());
                                     }
                                 };
                                 
-                                // Create SeriesDto from book info
                                 SeriesDto {
                                     id: book_info.seriesId,
                                     name: book_info.seriesName.clone(),
-                                    originalName: None,
-                                    localizedName: None,
-                                    sortName: None,
-                                    format: book_info.seriesFormat,
                                     coverImage: None,
-                                    libraryId: book_info.libraryId,
-                                    libraryName: "".to_string(),
-                                    pagesRead: None,
-                                    pages: Some(book_info.pages),
-                                    wordCount: None,
                                 }
                             }
                         }
@@ -665,28 +540,23 @@ async fn update_discord_status(
                 }
             };
             
-            // Update reading state
             reading_state.is_reading = true;
             reading_state.current_page = progress.pageNum;
             reading_state.total_pages = chapter.pages;
             reading_state.last_api_time = SystemTime::now();
             
-            // Update book if changed
             if current_book.as_ref().map_or(true, |book| {
                 book.series_id != series_id || book.chapter_id != progress.chapterId
             }) {
                 *current_book = Some(Book {
-                    name: series.name.clone(),
                     series_id: series_id,
                     chapter_id: progress.chapterId,
                 });
             }
             
-            // Extract author information from file path if available
             let author = if let Some(files) = &chapter.files {
                 if !files.is_empty() {
                     let file_path = &files[0].filePath;
-                    // Extract author from file path - assuming format like "/books/Author/Title"
                     file_path.split('/').nth(2).unwrap_or("Unknown Author").to_string()
                 } else {
                     "Unknown Author".to_string()
@@ -713,9 +583,6 @@ async fn update_discord_status(
             } else {
                 false
             };
-
-            //info!("Enhanced book detection: chapterNumber={}, volumeId={}, format={}, is_book={}", 
-            //      chapter.chapterNumber, chapter.volumeId, series.format, is_book);
             
             let volume_info = if !is_book {
                 match serde_json::from_str::<SeriesDetailDto>(&series_text) {
@@ -765,7 +632,6 @@ async fn update_discord_status(
                     author.clone()
                 }
             } else if chapter.chapterNumber.contains("-100000") && !volume_info.is_empty() {
-                // Special case for manga volumes - show volume info but not chapter info
                 if config.show_page_numbers.unwrap_or(false) {
                     format!("{} - {} - Page {} of {}", 
                         author.clone(),
@@ -777,7 +643,6 @@ async fn update_discord_status(
                     format!("{} - {}", author.clone(), volume_info)
                 }
             } else if config.show_page_numbers.unwrap_or(false) {
-                // Regular chapters with page numbers
                 format!("{} - {} Page {} of {}", 
                     author.clone(),
                     chapter_info,
@@ -785,7 +650,6 @@ async fn update_discord_status(
                     chapter.pages
                 )
             } else {
-                // Regular chapters without page numbers
                 if !chapter_info.is_empty() {
                     format!("{} - {}", author.clone(), chapter_info)
                 } else {
@@ -793,10 +657,8 @@ async fn update_discord_status(
                 }
             };
 
-            // Truncate if necessary
             let state_text = if state_text.len() > 100 { state_text[..100].to_string() } else { state_text };
             
-            // Format the details (book title)
             let details_text = if book_title.len() > 100 { 
                 book_title[..100].to_string() 
             } else { 
@@ -832,7 +694,6 @@ async fn update_discord_status(
                 .details(&details_text)
                 .state(&state_text);
                 
-            // Add timestamps if valid
             let now = SystemTime::now();
             let now_secs = match now.duration_since(UNIX_EPOCH) {
                 Ok(d) => d.as_secs() as i64,
@@ -886,26 +747,8 @@ async fn update_discord_status(
                 }
             }
 
-            // Add detailed debug logs for volume info 
-            //info!("Volume info detection results:");
-            //info!("- Is book: {}", is_book);
-            //info!("- ChapterDto volumeId: {}", chapter.volumeId);
-            //info!("- Volume info extracted: '{}'", volume_info);
-            if let Ok(detail) = serde_json::from_str::<SeriesDetailDto>(&series_text) {
-                //info!("- Available volumes in series: {}", detail.volumes.len());
-                for vol in &detail.volumes {
-                    //info!("  Volume: id={}, number={}, name={:?}", vol.id, vol.number, vol.name);
-                }
-            }
-
-            //info!("Status text components:");
-            //info!("- Book title: {}", book_title);
-            //info!("- Author: {}", author);
-            //info!("- Chapter info: '{}'", chapter_info);
-            //info!("- Final state text: '{}'", state_text);
         },
         Ok(None) => {
-            // No recent activity, clear status
             if reading_state.is_reading {
                 if let Err(e) = discord.clear_activity() {
                     error!("Failed to clear Discord activity: {}", e);
@@ -1050,7 +893,6 @@ async fn check_current_progress(
 }
 
 async fn check_kavita_server(client: &Client, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
-    // Simple health check - try to access the API
     let url = format!("{}/api/server/health", config.kavita_url);
     let response = client.get(&url)
         .timeout(Duration::from_secs(5))
