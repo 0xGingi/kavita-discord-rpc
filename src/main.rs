@@ -36,6 +36,7 @@ struct ReadHistoryEvent {
     seriesId: i32,
     seriesName: String,
     readDate: String,
+    readDateUtc: String,
     chapterId: i32,
 }
 
@@ -837,21 +838,29 @@ async fn check_current_progress(
                         let read_date = most_recent.readDate.clone();
                         info!("Last reading timestamp: {}", read_date);
 
-                        let event_time = match chrono::NaiveDateTime::parse_from_str(
-                            &read_date.replace('T', " ").split('.').next().unwrap_or(&read_date),
-                            "%Y-%m-%d %H:%M:%S"
-                        ) {
-                            Ok(dt) => dt,
+                        let read_date_utc = most_recent.readDateUtc.clone();
+                        info!("Last reading timestamp (UTC): {}", read_date_utc);
+
+                        let event_time = match chrono::DateTime::parse_from_rfc3339(&read_date_utc) {
+                            Ok(dt) => dt.naive_utc(),
                             Err(e) => {
-                                error!("Error parsing date '{}': {}. Using current time.", read_date, e);
-                                chrono::Local::now().naive_local()
+                                match chrono::NaiveDateTime::parse_from_str(
+                                    &read_date_utc.split('.').next().unwrap_or(&read_date_utc),
+                                    "%Y-%m-%dT%H:%M:%S"
+                                ) {
+                                    Ok(dt) => dt,
+                                    Err(e2) => {
+                                        error!("Error parsing UTC date '{}': {} (second attempt: {}). Using current time.", 
+                                               read_date_utc, e, e2);
+                                        chrono::Utc::now().naive_utc()
+                                    }
+                                }
                             }
                         };
 
-                        let now = chrono::Local::now().naive_local();
-                        
+                        let now = chrono::Utc::now().naive_utc();
                         let seconds_ago = (now - event_time).num_seconds();
-                        info!("Last activity: {} seconds ago (local comparison)", seconds_ago);
+                        info!("Last activity: {} seconds ago (UTC comparison)", seconds_ago);
 
                         let recent_threshold = (config.inactivity_timeout_minutes
                             .unwrap_or(15) * 60) as i64;  // Convert u64 to i64
