@@ -1,0 +1,14 @@
+{
+    "discord_client_id": "1350160997180248085",
+    "kavita_url": "http://your-kavita-server:5000 OR https://kavita.yourdomain.com",
+    "kavita_api_key": "YOUR_API_KEY",
+    "kavita_username": "YOUR_USERNAME",
+    "kavita_password": "YOUR_PASSWORD",
+    "show_page_numbers": true,
+    "inactivity_timeout_minutes": 5,
+    "blacklisted_series_ids": [123, 456, 789],
+    "blacklisted_series_names": ["Private Series", "Secret Book"],
+    "blacklisted_tags": ["NSFW", "Ecchi", "Adults Only"],
+    "blacklisted_genres": ["Adult", "Romance"],
+    "blacklisted_library_ids": [2, 5]
+}
