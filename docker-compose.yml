@@ -1,10 +1,13 @@
 services:
   kavita-discord-rpc:
     image: 0xgingi/kavita-discord-rpc:latest
+    # OR USE NIGHTLY TO FIX TIMEZONE BUG
+    #image: 0xgingi/kavita-discord-rpc:nightly
     volumes:
       - ./config:/app/config
       - /run/user/1000/discord-ipc-0:/run/user/1000/discord-ipc-0
     environment:
-      - XDG_RUNTIME_DIR=/run/user/1000
+    # REMOVE TZ IF ON NIGHTLY
       - TZ=America/New_York
+      - XDG_RUNTIME_DIR=/run/user/1000
     restart: unless-stopped 
