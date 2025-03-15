@@ -11,6 +11,8 @@ Note: You must run this on a system with discord open, but this will work on any
 
 Bug Note: Currently this may not work if your client and server are on different timezones! I have a PR to fix this on kavita as UTC on both sides would fix https://github.com/Kareadita/Kavita/pull/3640
 
+You can temporarily solve this by using my docker image: ```0xgingi/kavita:nightly``` 
+
 ## Install
 
 1. grab your linux or windows binary from: https://github.com/0xGingi/kavita-discord-rpc/releases
