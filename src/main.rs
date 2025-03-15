@@ -665,7 +665,7 @@ async fn check_current_progress(
     config: &Config,
     jwt_token: &str
 ) -> Result<Option<(ProgressDto, i32, i32, String)>, Box<dyn std::error::Error>> {
-    let account_url = format!("{}/api/Account/me", config.kavita_url);
+    let account_url = format!("{}/api/Users/myself", config.kavita_url);
     
     let account_response = client
         .get(&account_url)
@@ -674,16 +674,34 @@ async fn check_current_progress(
         .await?;
     
     let user_id = if account_response.status().is_success() {
-        match account_response.json::<serde_json::Value>().await {
+        let response_text = account_response.text().await?;
+        
+        match serde_json::from_str::<serde_json::Value>(&response_text) {
             Ok(account) => {
                 account.get("id").and_then(|v| v.as_i64()).unwrap_or(1)
             },
             Err(e) => {
-                error!("Failed to parse account info: {}", e);
-                1
+                error!("Failed to parse account info as object: {}", e);
+                
+                match serde_json::from_str::<Vec<serde_json::Value>>(&response_text) {
+                    Ok(accounts) => {
+                        if !accounts.is_empty() {
+                            info!("Successfully parsed response as array");
+                            accounts[0].get("id").and_then(|v| v.as_i64()).unwrap_or(1)
+                        } else {
+                            error!("Account response was empty array");
+                            1
+                        }
+                    },
+                    Err(e2) => {
+                        error!("Also failed to parse as array: {}", e2);
+                        1
+                    }
+                }
             }
         }
     } else {
+        error!("Failed to get account info: {}", account_response.status());
         1
     };
     
