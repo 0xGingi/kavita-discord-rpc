@@ -14,7 +14,18 @@ Displays what you're reading to on kavita on discord!
 3. Modify the config.json with your info
 4. run
 
-
+## Docker
+1. clone the repo
+```
+git clone https://github.com/0xGingi/kavita-discord-rpc
+cd kavita-discord-rpc
+```
+2. Modify config/config.json with your info
+3. Modify docker-compose.yml -TZ with your kavita server's timezone
+4. Run and Build
+```
+docker compose up -d --build
+```
 
 ## Build
 ```

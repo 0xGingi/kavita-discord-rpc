@@ -5,7 +5,7 @@
     "kavita_username": "YOUR_USERNAME",
     "kavita_password": "YOUR_PASSWORD",
     "show_page_numbers": true,
-    "inactivity_timeout_minutes": 15,
+    "inactivity_timeout_minutes": 5,
     "blacklisted_series_ids": [123, 456, 789],
     "blacklisted_series_names": ["Private Series", "Secret Book"],
     "blacklisted_tags": ["NSFW", "Ecchi", "Adults Only"],

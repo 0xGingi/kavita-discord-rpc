@@ -1,0 +1,10 @@
+services:
+  kavita-discord-rpc:
+    build: .
+    volumes:
+      - ./config:/app/config
+      - /run/user/1000/discord-ipc-0:/run/user/1000/discord-ipc-0
+    environment:
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - TZ=America/New_York
+    restart: unless-stopped 
