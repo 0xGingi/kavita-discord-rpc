@@ -9,6 +9,8 @@ Displays what you're reading on kavita on discord!
 
 Note: You must run this on a system with discord open, but this will work on any device you read on! (3rd party client support is unknown)
 
+Bug Note: Currently this may not work if your client and server are on different timezones! I have a PR to fix this on kavita as UTC on both sides would fix https://github.com/Kareadita/Kavita/pull/3640
+
 ## Install
 
 1. grab your linux or windows binary from: https://github.com/0xGingi/kavita-discord-rpc/releases
