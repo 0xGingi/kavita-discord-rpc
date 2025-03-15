@@ -11,6 +11,8 @@ use env_logger;
 use chrono;
 use chrono::TimeZone;
 use std::ops::Sub;
+use std::cmp::Ordering;
+use semver::{Version, VersionReq};
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -183,6 +185,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let config_file = parse_args()?;
     info!("Using config file: {}", config_file);
+    
+    // Check for updates at startup
+    if let Err(e) = check_for_updates(&client).await {
+        warn!("Failed to check for updates: {}", e);
+    }
     
     let config = load_config(&config_file)?;
     
@@ -1076,4 +1083,54 @@ fn get_volume_info_from_detail(
     }
     
     "".to_string()
+}
+
+async fn check_for_updates(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Checking for updates. Current version: {}", CURRENT_VERSION);
+    
+    let github_api_url = "https://api.github.com/repos/0xGingi/kavita-discord-rpc/releases/latest";
+    
+    let response = client.get(github_api_url)
+        .header("User-Agent", "kavita-discord-rpc")
+        .send()
+        .await?;
+    
+    if response.status().is_success() {
+        let latest_release: serde_json::Value = response.json().await?;
+        
+        if let Some(tag_name) = latest_release.get("tag_name").and_then(|v| v.as_str()) {
+            let latest_version_str = tag_name.trim_start_matches('v');
+            let current_version_str = CURRENT_VERSION.trim_start_matches('v');
+            
+            info!("GitHub latest release: {}, Local version: {}", latest_version_str, current_version_str);
+            
+            match (Version::parse(current_version_str), Version::parse(latest_version_str)) {
+                (Ok(current), Ok(latest)) => {
+                    match current.cmp(&latest) {
+                        Ordering::Less => {
+                            info!("New version available! Current: {}, Latest: {}", 
+                                  CURRENT_VERSION, tag_name);
+                            info!("Download it from: https://github.com/0xGingi/kavita-discord-rpc/releases/latest");
+                        },
+                        Ordering::Greater => {
+                            info!("Running version {} which is newer than the latest release {} (development build?)", 
+                                  CURRENT_VERSION, tag_name);
+                        },
+                        Ordering::Equal => {
+                            info!("You are running the latest released version: {}", CURRENT_VERSION);
+                        }
+                    }
+                },
+                _ => {
+                    warn!("Could not parse version numbers for comparison");
+                }
+            }
+        } else {
+            warn!("Could not extract version from GitHub release");
+        }
+    } else {
+        warn!("Failed to check for updates: HTTP {}", response.status());
+    }
+    
+    Ok(())
 }
