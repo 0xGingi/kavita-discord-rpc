@@ -14,7 +14,9 @@ Displays what you're reading to on kavita on discord!
 3. Modify the config.json with your info
 4. run
 
-## Docker
+## Docker (Only works on Linux - Discord must be installed on the system)
+Note: If using windows, this may work via WSL2, Discord must also be installed via WSL2 and open
+
 1. clone the repo
 ```
 git clone https://github.com/0xGingi/kavita-discord-rpc
