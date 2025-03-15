@@ -885,9 +885,9 @@ async fn update_discord_status(
             //info!("- ChapterDto volumeId: {}", chapter.volumeId);
             //info!("- Volume info extracted: '{}'", volume_info);
             if let Ok(detail) = serde_json::from_str::<SeriesDetailDto>(&series_text) {
-                info!("- Available volumes in series: {}", detail.volumes.len());
+                //info!("- Available volumes in series: {}", detail.volumes.len());
                 for vol in &detail.volumes {
-                    info!("  Volume: id={}, number={}, name={:?}", vol.id, vol.number, vol.name);
+                    //info!("  Volume: id={}, number={}, name={:?}", vol.id, vol.number, vol.name);
                 }
             }
 
