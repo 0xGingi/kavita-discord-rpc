@@ -7,6 +7,8 @@
 
 Displays what you're reading on kavita on discord!
 
+Note: You must run this on a system with discord open, but this will work on any device you read on! (3rd party client support is unknown)
+
 ## Install
 
 1. grab your linux or windows binary from: https://github.com/0xGingi/kavita-discord-rpc/releases
