@@ -5,7 +5,7 @@
 ![image](https://github.com/user-attachments/assets/a5c56d2a-2015-456c-948a-a08b769cd54c)
 
 
-Displays what you're reading to on kavita on discord!
+Displays what you're reading on kavita on discord!
 
 ## Install
 
