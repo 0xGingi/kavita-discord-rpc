@@ -22,7 +22,7 @@ Note: If using windows, this may work via WSL2, Discord must also be installed v
 git clone https://github.com/0xGingi/kavita-discord-rpc
 cd kavita-discord-rpc
 ```
-2. Modify config/config.json with your info
+2. Rename config/config-example.json to config/config.json and modify it
 3. Modify docker-compose.yml -TZ with your kavita server's timezone
 4. Run and Build
 ```
