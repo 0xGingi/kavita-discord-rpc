@@ -11,5 +11,6 @@
     "blacklisted_tags": ["NSFW", "Ecchi", "Adults Only"],
     "blacklisted_genres": ["Adult", "Romance"],
     "blacklisted_library_ids": [69, 420],
-    "image_format": "png"
+    "image_format": "png",
+    "proxy_enabled": true
 }

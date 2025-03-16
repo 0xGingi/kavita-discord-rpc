@@ -9,7 +9,7 @@ Displays what you're reading on kavita on discord!
 
 Note: You must run this on a system with discord open, but this will work on any device you read on! (3rd party client support is unknown)
 
-Coverart will only work if you connect to kavita via HTTPS
+Note: If Using HTTP instead of HTTPS, Your coverart images are sent to the coverart server, then the link is given to discord. You can disable this by setting proxy_enabled to false in the config.json.
 
 ## Install
 

@@ -66,6 +66,7 @@ struct Config {
     blacklisted_library_ids: Option<Vec<i32>>,
     inactivity_timeout_minutes: Option<u64>,
     image_format: Option<String>,
+    proxy_enabled: Option<bool>,
 }
 
 #[allow(non_snake_case)]
@@ -717,11 +718,13 @@ async fn update_discord_status(
             
             let image_format = config.image_format.as_deref().unwrap_or("png");
 
+            let proxy_enabled = config.proxy_enabled.unwrap_or(true);
+
             let series_cover_url = if let Some(cover_image) = &series.coverImage {
                 if !cover_image.is_empty() {
                     let params = format!("?seriesId={}&apiKey={}&format={}", 
                         series.id, config.kavita_api_key, image_format);
-                    Some(get_cover_url(&config.kavita_url, "/api/Image/series-cover", &params))
+                    Some(get_cover_url(&config.kavita_url, "/api/Image/series-cover", &params, proxy_enabled))
                 } else {
                     None
                 }
@@ -733,7 +736,7 @@ async fn update_discord_status(
                 if !cover_image.is_empty() {
                     let params = format!("?chapterId={}&apiKey={}&format={}", 
                         chapter.id, config.kavita_api_key, image_format);
-                    Some(get_cover_url(&config.kavita_url, "/api/Image/chapter-cover", &params))
+                    Some(get_cover_url(&config.kavita_url, "/api/Image/chapter-cover", &params, proxy_enabled))
                 } else {
                     None
                 }
@@ -1070,8 +1073,8 @@ async fn check_for_updates(client: &Client) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-fn get_cover_url(base_url: &str, endpoint: &str, params: &str) -> String {
-    if base_url.starts_with("http://") {
+fn get_cover_url(base_url: &str, endpoint: &str, params: &str, proxy_enabled: bool) -> String {
+    if proxy_enabled && base_url.starts_with("http://") {
         format!("UPLOAD:{}{}{}", base_url, endpoint, params)
     } else {
         format!("{}{}{}", base_url, endpoint, params)
