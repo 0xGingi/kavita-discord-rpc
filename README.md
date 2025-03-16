@@ -26,13 +26,12 @@ docker run -d \
   -v ./config:/app/config \
   -v /run/user/1000/discord-ipc-0:/run/user/1000/discord-ipc-0 \
   -e XDG_RUNTIME_DIR=/run/user/1000 \
-  -e TZ=America/New_York \
   --restart unless-stopped \
   --name kavita-discord-rpc \
   0xgingi/kavita-discord-rpc:latest
 ```
 
-Edit your timezone and ensure you've created a config folder with config.json in it.
+ensure you've created a config folder with config.json in it.
 
 ### Docker Compose
 
@@ -42,8 +41,7 @@ git clone https://github.com/0xGingi/kavita-discord-rpc
 cd kavita-discord-rpc
 ```
 2. Rename config/config-example.json to config/config.json and modify it
-3. Modify docker-compose.yml -TZ with your kavita server's timezone
-4. Run
+3. Run
 ```
 docker compose up -d
 ```

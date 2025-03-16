@@ -658,16 +658,24 @@ async fn update_discord_status(
                 }
             };
 
-            let state_text = if state_text.len() > 100 { state_text[..100].to_string() } else { state_text };
+            let state_text = if state_text.chars().count() > 100 { 
+                state_text.chars().take(100).collect::<String>() 
+            } else { 
+                state_text 
+            };
             
-            let details_text = if book_title.len() > 100 { 
-                book_title[..100].to_string() 
+            let details_text = if book_title.chars().count() > 100 { 
+                book_title.chars().take(100).collect::<String>() 
             } else { 
                 book_title.clone()
             };
 
             let large_text = format!("{} - {}", details_text, state_text);
-            let large_text = if large_text.len() > 100 { large_text[..100].to_string() } else { large_text };
+            let large_text = if large_text.chars().count() > 100 { 
+                large_text.chars().take(100).collect::<String>() 
+            } else { 
+                large_text 
+            };
             
             let series_cover_url = if let Some(cover_image) = &series.coverImage {
                 if !cover_image.is_empty() {
