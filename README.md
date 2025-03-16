@@ -16,7 +16,7 @@ Note: You must run this on a system with discord open, but this will work on any
 3. Modify the config.json with your info
 4. run
 
-## Docker (Only works on Linux - Discord must be installed on the system)
+## Docker (Kavita Nightly Reccomended - Only works on Linux - Discord must be installed on the system)
 Note: If using windows, this may work via WSL2, Discord must also be installed via WSL2 and open
 
 ### Docker
