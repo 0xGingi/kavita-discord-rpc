@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use discord_rich_presence::{activity, DiscordIpcClient, DiscordIpc};
 use serde::Deserialize;
 use std::fs;
@@ -11,8 +14,42 @@ use env_logger;
 use chrono;
 use std::cmp::Ordering;
 use semver::Version;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+struct ImageCache {
+    urls: HashMap<String, (String, Instant)>,
+    max_age: Duration,
+}
+
+impl ImageCache {
+    fn new(max_age_hours: u64) -> Self {
+        ImageCache {
+            urls: HashMap::new(),
+            max_age: Duration::from_secs(max_age_hours * 3600),
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<String> {
+        if let Some((url, timestamp)) = self.urls.get(key) {
+            if timestamp.elapsed() < self.max_age {
+                return Some(url.clone());
+            }
+        }
+        None
+    }
+
+    fn set(&mut self, key: String, url: String) {
+        self.urls.insert(key, (url, Instant::now()));
+    }
+}
+
+lazy_static! {
+    static ref IMAGE_CACHE: Arc<Mutex<ImageCache>> = Arc::new(Mutex::new(ImageCache::new(24)));
+}
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -682,8 +719,9 @@ async fn update_discord_status(
 
             let series_cover_url = if let Some(cover_image) = &series.coverImage {
                 if !cover_image.is_empty() {
-                    Some(format!("{}/api/Image/series-cover?seriesId={}&apiKey={}&format={}", 
-                        config.kavita_url, series.id, config.kavita_api_key, image_format))
+                    let params = format!("?seriesId={}&apiKey={}&format={}", 
+                        series.id, config.kavita_api_key, image_format);
+                    Some(get_cover_url(&config.kavita_url, "/api/Image/series-cover", &params))
                 } else {
                     None
                 }
@@ -693,10 +731,45 @@ async fn update_discord_status(
 
             let chapter_cover_url = if let Some(cover_image) = &chapter.coverImage {
                 if !cover_image.is_empty() {
-                    Some(format!("{}/api/Image/chapter-cover?chapterId={}&apiKey={}&format={}", 
-                        config.kavita_url, chapter.id, config.kavita_api_key, image_format))
+                    let params = format!("?chapterId={}&apiKey={}&format={}", 
+                        chapter.id, config.kavita_api_key, image_format);
+                    Some(get_cover_url(&config.kavita_url, "/api/Image/chapter-cover", &params))
                 } else {
                     None
+                }
+            } else {
+                None
+            };
+
+            let actual_series_cover_url = if let Some(url) = &series_cover_url {
+                if url.starts_with("UPLOAD:") {
+                    let real_url = url.trim_start_matches("UPLOAD:");
+                    match fetch_and_upload_image(client, real_url, "https://coverart.0xgingi.xyz/upload").await {
+                        Ok(uploaded_url) => Some(uploaded_url),
+                        Err(e) => {
+                            error!("Failed to upload series cover: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    Some(url.clone())
+                }
+            } else {
+                None
+            };
+
+            let actual_chapter_cover_url = if let Some(url) = &chapter_cover_url {
+                if url.starts_with("UPLOAD:") {
+                    let real_url = url.trim_start_matches("UPLOAD:");
+                    match fetch_and_upload_image(client, real_url, "https://coverart.0xgingi.xyz/upload").await {
+                        Ok(uploaded_url) => Some(uploaded_url),
+                        Err(e) => {
+                            error!("Failed to upload chapter cover: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    Some(url.clone())
                 }
             } else {
                 None
@@ -723,13 +796,13 @@ async fn update_discord_status(
                 );
             }
             
-            if let Some(url) = &series_cover_url {
+            if let Some(url) = &actual_series_cover_url {
                 activity_builder = activity_builder.assets(
                     activity::Assets::new()
                         .large_image(url)
                         .large_text(&large_text)
                 );
-            } else if let Some(url) = &chapter_cover_url {
+            } else if let Some(url) = &actual_chapter_cover_url {
                 activity_builder = activity_builder.assets(
                     activity::Assets::new()
                         .large_image(url)
@@ -995,4 +1068,62 @@ async fn check_for_updates(client: &Client) -> Result<(), Box<dyn std::error::Er
     }
     
     Ok(())
+}
+
+fn get_cover_url(base_url: &str, endpoint: &str, params: &str) -> String {
+    if base_url.starts_with("http://") {
+        format!("UPLOAD:{}{}{}", base_url, endpoint, params)
+    } else {
+        format!("{}{}{}", base_url, endpoint, params)
+    }
+}
+
+async fn fetch_and_upload_image(
+    client: &Client,
+    image_url: &str,
+    upload_url: &str
+) -> Result<String, Box<dyn std::error::Error>> {
+    if let Some(cached_url) = IMAGE_CACHE.lock().unwrap().get(image_url) {
+        info!("Using cached image URL: {}", cached_url);
+        return Ok(cached_url);
+    }
+    
+    info!("Uploading image from {}", image_url);
+    
+    let image_response = client.get(image_url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
+    
+    if !image_response.status().is_success() {
+        return Err(format!("Failed to fetch image: {}", image_response.status()).into());
+    }
+    
+    let content_type = image_response.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+    
+    let image_bytes = image_response.bytes().await?;
+    
+    let upload_response = client.post(upload_url)
+        .header(reqwest::header::CONTENT_TYPE, content_type)
+        .body(image_bytes)
+        .send()
+        .await?;
+    
+    if !upload_response.status().is_success() {
+        return Err(format!("Failed to upload image: {}", upload_response.status()).into());
+    }
+    
+    let json_response = upload_response.json::<serde_json::Value>().await?;
+    let image_path = json_response["url"].as_str()
+        .ok_or("Invalid response from upload server")?;
+    
+    let full_url = format!("https://coverart.0xgingi.xyz{}", image_path);
+    
+    IMAGE_CACHE.lock().unwrap().set(image_url.to_string(), full_url.clone());
+    
+    Ok(full_url)
 }
