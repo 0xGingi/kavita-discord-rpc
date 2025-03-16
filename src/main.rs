@@ -28,6 +28,7 @@ struct Config {
     blacklisted_genres: Option<Vec<String>>,
     blacklisted_library_ids: Option<Vec<i32>>,
     inactivity_timeout_minutes: Option<u64>,
+    image_format: Option<String>,
 }
 
 #[allow(non_snake_case)]
@@ -677,10 +678,12 @@ async fn update_discord_status(
                 large_text 
             };
             
+            let image_format = config.image_format.as_deref().unwrap_or("png");
+
             let series_cover_url = if let Some(cover_image) = &series.coverImage {
                 if !cover_image.is_empty() {
-                    Some(format!("{}/api/Image/series-cover?seriesId={}&apiKey={}", 
-                        config.kavita_url, series.id, config.kavita_api_key))
+                    Some(format!("{}/api/Image/series-cover?seriesId={}&apiKey={}&format={}", 
+                        config.kavita_url, series.id, config.kavita_api_key, image_format))
                 } else {
                     None
                 }
@@ -690,8 +693,8 @@ async fn update_discord_status(
 
             let chapter_cover_url = if let Some(cover_image) = &chapter.coverImage {
                 if !cover_image.is_empty() {
-                    Some(format!("{}/api/Image/chapter-cover?chapterId={}&apiKey={}", 
-                        config.kavita_url, chapter.id, config.kavita_api_key))
+                    Some(format!("{}/api/Image/chapter-cover?chapterId={}&apiKey={}&format={}", 
+                        config.kavita_url, chapter.id, config.kavita_api_key, image_format))
                 } else {
                     None
                 }
