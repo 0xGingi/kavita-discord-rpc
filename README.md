@@ -18,7 +18,7 @@ Note: If Using HTTP instead of HTTPS, Your coverart images are sent to the cover
 3. Modify the config.json with your info
 4. run
 
-## Docker (Kavita Nightly Reccomended - Only works on Linux - Discord must be installed on the system)
+## Docker (Only works on Linux - Discord must be installed on the system)
 Note: If using windows, this may work via WSL2, Discord must also be installed via WSL2 and open
 
 ### Docker
