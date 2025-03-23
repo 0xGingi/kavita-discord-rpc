@@ -14,7 +14,7 @@ Note: If Using HTTP instead of HTTPS, Your coverart images are sent to the cover
 ## Install
 
 1. grab your linux or windows binary from: https://github.com/0xGingi/kavita-discord-rpc/releases
-2. copy the config.example.json and rename it as config.json in the same folder as your binary
+2. copy the config.example.json and rename it as config.json in the same folder as your binary (config.json can be anywhere, just run the binary with -c /path/to/config.json)
 3. Modify the config.json with your info
 4. run
 
