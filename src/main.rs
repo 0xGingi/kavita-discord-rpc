@@ -199,6 +199,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut current_book,
         ).await {
             error!("Error updating Discord status: {}", e);
+            
+            info!("Attempting to reconnect to Discord...");
+            if let Err(reconnect_err) = discord.connect() {
+                error!("Failed to reconnect to Discord: {}", reconnect_err);
+            } else {
+                info!("Successfully reconnected to Discord");
+            }
         }
         time::sleep(Duration::from_secs(15)).await;
     }
@@ -363,7 +370,6 @@ async fn update_discord_status(
                     Ok(response) if response.status().is_success() => {
                         match response.json::<serde_json::Value>().await {
                             Ok(metadata) => {
-                                // Check for blacklisted tags
                                 if let Some(blacklisted_tags) = &config.blacklisted_tags {
                                     if let Some(tags) = metadata.get("tags").and_then(|t| t.as_array()) {
                                         for tag in tags {
@@ -825,13 +831,7 @@ async fn update_discord_status(
                 },
                 Err(e) => {
                     error!("Failed to set Discord activity: {}", e);
-                    
-                    match discord.set_activity(activity::Activity::new()
-                        .details(&series.name)
-                        .state("Reading...")) {
-                        Ok(_) => info!("Set simplified Discord status"),
-                        Err(e) => error!("Failed to set simplified Discord activity: {}", e)
-                    }
+                    return Err(e.into());
                 }
             }
 
@@ -950,7 +950,7 @@ async fn check_current_progress(
                         info!("Last activity: {} seconds ago (UTC comparison)", seconds_ago);
 
                         let recent_threshold = (config.inactivity_timeout_minutes
-                            .unwrap_or(15) * 60) as i64;  // Convert u64 to i64
+                            .unwrap_or(15) * 60) as i64;
 
                         if seconds_ago < recent_threshold {
                             let chapter_id = most_recent.chapterId;
